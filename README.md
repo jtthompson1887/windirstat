@@ -90,6 +90,12 @@ For your safety, install WinDirStat only through the Microsoft Store link and pa
 
 WinDirStat can be built with Visual Studio 2022 or later. A Visual Studio solution file can be loaded from `windirstat\WinDirStat.sln`.
 
+## Local MCP server
+
+Launch `WinDirStat.exe /mcp` to run a local [Model Context Protocol](https://modelcontextprotocol.io/) server over standard input/output. The server is hidden and uses newline-delimited JSON-RPC 2.0 messages; do not write diagnostics to standard output.
+
+It supports `initialize`, `tools/list`, and `tools/call`. The available tools are read-only: `get_scan_status`, `get_tree`, `find_large_items`, and `get_selection`; `scan_path` only starts a scan and immediately returns `{"started":true}`. Poll `get_scan_status` while scanning. No deletion, move, cleanup, networking, or authentication tools are exposed. Model and selection access is synchronously dispatched to the application UI thread, and tree responses are bounded to 5,000 items.
+
 ## Contributors
 
 You can contribute by responding to issues, [developing](https://github.com/windirstat/windirstat/wiki/Developers) source code, or developing [translations](https://github.com/windirstat/windirstat/wiki/Contribute-Translation).

@@ -20,6 +20,7 @@
 #include "AboutDlg.h"
 #include "TreeMapView.h"
 #include "CsvLoader.h"
+#include "Mcp/McpServer.h"
 
 CIconHandler* GetIconHandler()
 {
@@ -241,6 +242,7 @@ class CWinDirStatCommandLineInfo final : public CCommandLineInfo
     const std::wstring savePermsToFlag = L"savepermsto";
     const std::wstring loadFromFlag = L"loadfrom";
     const std::wstring legacyUninstallFlag = L"legacyuninstall";
+    bool m_mcpRequested = false;
 
 public:
 
@@ -251,6 +253,7 @@ public:
     }
     bool HasInvalidPath() const noexcept { return m_invalidPath; }
     bool IsLegacyUninstallRequested() const noexcept { return m_operationFlag == legacyUninstallFlag; }
+    bool IsMcpRequested() const noexcept { return m_mcpRequested; }
 
     void ParseParam(const WCHAR* pszParam, BOOL bFlag, BOOL bLast) override
     {
@@ -348,6 +351,11 @@ public:
                 m_operationFlag = param;
             }
         }
+        else if (param == L"mcp")
+        {
+            if (hadPriorParam || !bLast || !m_operationFlag.empty()) m_malformedFlag = true;
+            else m_mcpRequested = true;
+        }
     }
 };
 
@@ -407,8 +415,8 @@ BOOL CDirStatApp::InitInstance()
     }
 
     // Check if we should hide the app window
-    const bool hideApp = !m_saveToPath.empty() || !m_saveDupesToPath.empty() || !m_savePermsToPath.empty();
-    if (hideApp && (cmdInfo.m_strFileName.IsEmpty() || cmdInfo.HasInvalidPath())) ExitProcess(1);
+    const bool hideApp = !m_saveToPath.empty() || !m_saveDupesToPath.empty() || !m_savePermsToPath.empty() || cmdInfo.IsMcpRequested();
+    if (hideApp && !cmdInfo.IsMcpRequested() && (cmdInfo.m_strFileName.IsEmpty() || cmdInfo.HasInvalidPath())) ExitProcess(1);
     if (hideApp) m_nCmdShow = SW_HIDE;
 
     m_model = std::make_unique<CWinDirStatModel>();
@@ -426,6 +434,12 @@ BOOL CDirStatApp::InitInstance()
     m_pMainWnd->ShowWindow(m_nCmdShow);
     m_pMainWnd->Invalidate();
     m_pMainWnd->UpdateWindow();
+
+    if (cmdInfo.IsMcpRequested())
+    {
+        m_mcpServer = std::make_unique<CMcpServer>(*m_model);
+        m_mcpServer->Start();
+    }
 
     // When called by setup.exe, WinDirStat remained in the
     // background, so force it to the foreground
@@ -475,7 +489,7 @@ BOOL CDirStatApp::InitInstance()
     // Reject unsupported quiet roots instead of leaving a hidden process idle.
     if (cmdInfo.m_strFileName.IsEmpty())
     {
-        OnSelectScanRoots();
+        if (!cmdInfo.IsMcpRequested()) OnSelectScanRoots();
     }
     else if (!CWinDirStatModel::Get()->StartScan(cmdInfo.m_strFileName.GetString()))
     {
@@ -484,6 +498,12 @@ BOOL CDirStatApp::InitInstance()
     }
 
     return TRUE;
+}
+
+int CDirStatApp::ExitInstance()
+{
+    m_mcpServer.reset();
+    return CWinAppEx::ExitInstance();
 }
 
 BOOL CDirStatApp::IsIdleMessage(MSG* pMsg)

@@ -22,6 +22,7 @@
 
 class CMainFrame;
 class CWinDirStatModel;
+class CMcpServer;
 class CDirStatApp;
 
 // Frequently used "globals"
@@ -40,6 +41,7 @@ public:
     CDirStatApp();
     ~CDirStatApp() override;
     BOOL InitInstance() override;
+    int ExitInstance() override;
     BOOL LoadState(LPCTSTR, CFrameImpl*) override { return TRUE; }
     BOOL IsIdleMessage(MSG* pMsg) override;
 
@@ -70,6 +72,7 @@ protected:
     COLORREF GetAlternativeColor(COLORREF clrDefault, const std::wstring& which) const;
 
     std::unique_ptr<CWinDirStatModel> m_model;
+    std::unique_ptr<CMcpServer> m_mcpServer;
 
     CIconHandler m_iconList;        // Central icon list
     COLORREF m_altColor;            // Coloring of compressed items
