@@ -88,7 +88,7 @@ namespace
     {
         const std::regex pattern(R"json("id"\s*:\s*("(?:\\.|[^"\\])*"|[0-9]+|null))json");
         std::smatch match;
-        return std::regex_search(json, match, pattern) ? match[1].str() : {};
+        return std::regex_search(json, match, pattern) ? match[1].str() : std::string{};
     }
 
     std::string ItemJson(const CItem* item, const uint64_t depth, const uint64_t maxDepth, size_t& itemCount)
