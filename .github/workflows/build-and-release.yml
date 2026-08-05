@@ -1,0 +1,148 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'release/v*'
+      - 'beta/v*'
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install WiX Toolset v4
+        run: dotnet tool install --global wix
+        shell: pwsh
+
+      - name: Install WiX extensions
+        run: |
+          wix extension add WixToolset.UI.wixext
+          wix extension add WixToolset.Util.wixext
+        shell: pwsh
+
+      - name: Determine build flags
+        id: flags
+        run: |
+          $PRODUCTION = 0
+          if ("${{ github.ref_name }}" -imatch "^release/") { $PRODUCTION = 1 }
+          "production=$PRODUCTION" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Build x86
+        run: msbuild windirstat.sln /p:Configuration=Release /p:Platform=Win32 /t:Clean;Build /p:ExternalCompilerOptions="/DPRODUCTION=${{ steps.flags.outputs.production }}"
+        shell: cmd
+
+      - name: Build x64
+        run: msbuild windirstat.sln /p:Configuration=Release /p:Platform=x64 /t:Clean;Build /p:ExternalCompilerOptions="/DPRODUCTION=${{ steps.flags.outputs.production }}"
+        shell: cmd
+
+      - name: Build ARM64
+        run: msbuild windirstat.sln /p:Configuration=Release /p:Platform=ARM64 /t:Clean;Build /p:ExternalCompilerOptions="/DPRODUCTION=${{ steps.flags.outputs.production }}"
+        shell: cmd
+
+      - name: Build MSI installers
+        run: |
+          $RELTYPE = if ("${{ steps.flags.outputs.production }}" -eq "1") { "PRODUCTION" } else { "BETA" }
+          Set-Location setup\msi
+          cmd /c "build.cmd $RELTYPE"
+          if ($LASTEXITCODE -ne 0) { throw "MSI build failed" }
+        shell: pwsh
+
+      - name: Prepare publish directory
+        run: |
+          New-Item -ItemType Directory -Force -Path publish | Out-Null
+          foreach ($arch in @("arm64","x86","x64")) {
+            New-Item -ItemType Directory -Force -Path "publish\$arch" | Out-Null
+            Copy-Item "build\WinDirStat_$arch.exe" "publish\$arch\WinDirStat.exe"
+            Copy-Item "build\WinDirStat_$arch.pdb" "publish\$arch\WinDirStat.pdb"
+            Copy-Item "build\WinDirStat-$arch.msi" "publish\"
+          }
+        shell: pwsh
+
+      - name: Archive executables
+        run: |
+          7z a -mx=9 -mf=off publish\WinDirStat.7z publish\*\*.exe
+          7z a -mx=9 -mf=off publish\WinDirStat-DebugSymbols.7z publish\*\*.pdb
+          7z a -tzip -mx=9 publish\WinDirStat.zip publish\*\*.exe
+        shell: cmd
+
+      - name: Generate checksums
+        run: |
+          $HASHFILE = "publish\WinDirStat-Hashes.txt"
+          $files = Get-ChildItem -Recurse -Include @('*.msi','*.zip','*.7z') -Path 'publish' |
+            Where-Object { $_.FullName -notlike '*\unsigned\*' }
+          'SHA256','SHA1','MD5' | ForEach-Object {
+            $files | Get-FileHash -Algorithm $_ | Out-File -Append $HASHFILE -Width 256
+          }
+          $data = Get-Content $HASHFILE
+          if ($data) {
+            $data.Replace((Get-Item -LiteralPath 'publish').FullName + '\','').Trim() |
+              Set-Content $HASHFILE
+          }
+        shell: pwsh
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windirstat-build
+          path: |
+            publish/*.msi
+            publish/*.zip
+            publish/*.7z
+            publish/WinDirStat-Hashes.txt
+            publish/*/WinDirStat.exe
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windirstat-build
+          path: publish
+
+      - name: Determine release metadata
+        id: meta
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -imatch "^release/v?(.+)$") {
+            $version = $Matches[1]
+            $prerelease = "false"
+          } elseif ($tag -imatch "^beta/v?(.+)$") {
+            $version = $Matches[1] -replace '/', '.'
+            $prerelease = "true"
+          } else {
+            throw "Unexpected tag format: $tag"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "prerelease=$prerelease" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: WinDirStat ${{ steps.meta.outputs.version }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          files: |
+            publish/*.msi
+            publish/*.zip
+            publish/*.7z
+            publish/WinDirStat-Hashes.txt
+            publish/*/WinDirStat.exe
