@@ -1,0 +1,53 @@
+name: Build executable
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ['release/*', 'beta/*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [Win32, x64, ARM64]
+        include:
+          - platform: Win32
+            artifact_name: windirstat-x86
+            executable_name: WinDirStat_x86.exe
+          - platform: x64
+            artifact_name: windirstat-x64
+            executable_name: WinDirStat_x64.exe
+          - platform: ARM64
+            artifact_name: windirstat-arm64
+            executable_name: WinDirStat_arm64.exe
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2.0.0
+      - name: Build Release executable
+        shell: pwsh
+        run: >
+          msbuild windirstat.sln
+          /m
+          /t:Build
+          /p:Configuration=Release
+          /p:Platform=${{ matrix.platform }}
+          /p:ExternalCompilerOptions=/DPRODUCTION=0
+      - name: Stage executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Copy-Item "build/${{ matrix.executable_name }}" "dist/WinDirStat.exe"
+      - name: Publish executable
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/WinDirStat.exe
+          if-no-files-found: error
